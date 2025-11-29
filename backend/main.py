@@ -5,7 +5,7 @@ import uvicorn
 
 from app.database import engine, Base, get_db
 from app.models import User, UserRole
-from app.routers import auth, rides, users, admin, intercity, vacation
+from app.routers import auth, rides, users, admin, vacation, vacation_scheduler
 from app.websocket import manager
 from app.auth import decode_access_token, get_current_active_user
 from sqlalchemy.orm import Session
@@ -45,8 +45,8 @@ app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(rides.router, prefix="/api/rides", tags=["Rides"])
 app.include_router(users.router, prefix="/api/users", tags=["Users"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
-app.include_router(intercity.router, prefix="/api/intercity", tags=["Intercity"])
 app.include_router(vacation.router, prefix="/api/vacation", tags=["Vacation"])
+app.include_router(vacation_scheduler.router, prefix="/api/scheduler", tags=["Vacation Scheduler"])
 
 @app.get("/")
 async def root():
@@ -83,7 +83,7 @@ async def test_user_role(user_id: int, db: Session = Depends(get_db)):
     }
 
 @app.websocket("/ws/{token}")
-async def websocket_endpoint(websocket: WebSocket, token: str):
+async def websocket_endpoint(websocket: WebSocket, token: str, db: Session = Depends(get_db)):
     # Decode token to get user info
     payload = decode_access_token(token)
     if not payload:
@@ -95,9 +95,13 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
         await websocket.close(code=1008)
         return
     
-    # For simplicity, using email hash as user_id
-    # In production, query the database to get actual user_id
-    user_id = hash(user_email) % 1000000
+    # Get actual user from database
+    user = db.query(User).filter(User.email == user_email).first()
+    if not user:
+        await websocket.close(code=1008)
+        return
+    
+    user_id = user.id
     
     await manager.connect(websocket, user_id)
     try:

@@ -79,7 +79,7 @@ async def update_driver_location(
     db: Session = Depends(get_db)
 ):
     """Update driver's current location"""
-    if current_user.role != UserRole.DRIVER:
+    if current_user.role.value != UserRole.DRIVER.value:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only drivers can update their location"
@@ -131,7 +131,7 @@ async def toggle_driver_availability(
     """Toggle driver availability status"""
     
     # Check if user is a driver
-    if current_user.role != UserRole.DRIVER:
+    if current_user.role != UserRole.DRIVER:  # Use direct enum comparison
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only drivers can update their availability"
@@ -167,6 +167,7 @@ async def toggle_driver_availability(
         db.commit()
         db.refresh(driver_profile)
         db.refresh(current_user)
+        print(f"Driver {current_user.id} availability toggled to: {driver_profile.is_available}")
     except Exception as e:
         db.rollback()
         raise HTTPException(

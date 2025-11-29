@@ -172,6 +172,11 @@ class VacationCreate(BaseModel):
     passengers: int = 1
     ride_included: bool = True
     hotel_included: bool = True
+    # New fields for automated schedule-based trip planner
+    schedule: Optional[str] = None  # JSON string containing the full trip schedule
+    flight_details: Optional[str] = None  # JSON string containing flight/train details
+    activities: Optional[str] = None  # JSON string containing activities schedule
+    meal_preferences: Optional[str] = None  # JSON string containing meal timings
 
 class VacationResponse(BaseModel):
     id: int
@@ -189,6 +194,11 @@ class VacationResponse(BaseModel):
     status: str
     booking_reference: Optional[str]
     created_at: datetime
+    # New fields for automated schedule-based trip planner
+    schedule: Optional[str] = None  # JSON string containing the full trip schedule
+    flight_details: Optional[str] = None  # JSON string containing flight/train details
+    activities: Optional[str] = None  # JSON string containing activities schedule
+    meal_preferences: Optional[str] = None  # JSON string containing meal timings
     
     class Config:
         from_attributes = True

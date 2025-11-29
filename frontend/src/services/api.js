@@ -122,33 +122,6 @@ export const adminService = {
   },
 }
 
-export const intercityService = {
-  async getCities() {
-    const response = await api.get('/intercity/cities')
-    return response.data
-  },
-
-  async createCity(data) {
-    const response = await api.post('/intercity/cities', data)
-    return response.data
-  },
-
-  async createRide(data) {
-    const response = await api.post('/intercity/rides', data)
-    return response.data
-  },
-
-  async getRides() {
-    const response = await api.get('/intercity/rides')
-    return response.data
-  },
-
-  async acceptRide(id) {
-    const response = await api.patch(`/intercity/rides/${id}/accept`)
-    return response.data
-  },
-}
-
 export const vacationService = {
   async createVacation(data) {
     const response = await api.post('/vacation/', data)
@@ -157,6 +130,11 @@ export const vacationService = {
 
   async getVacations() {
     const response = await api.get('/vacation/')
+    return response.data
+  },
+
+  async getAvailableVacations() {
+    const response = await api.get('/vacation/available')
     return response.data
   },
 
@@ -175,8 +153,43 @@ export const vacationService = {
     return response.data
   },
 
+  async rejectVacation(id) {
+    const response = await api.patch(`/vacation/${id}/reject`)
+    return response.data
+  },
+
   async getLoyaltyPoints() {
     const response = await api.get('/vacation/loyalty/points')
+    return response.data
+  },
+}
+
+export const vacationSchedulerService = {
+  async scheduleVacationRides(vacationId) {
+    const response = await api.post(`/scheduler/vacation/${vacationId}/schedule-rides`)
+    return response.data
+  },
+}
+
+// Add the missing intercityService
+export const intercityService = {
+  async getCities() {
+    const response = await api.get('/intercity/cities')
+    return response.data
+  },
+
+  async getRides() {
+    const response = await api.get('/intercity/rides')
+    return response.data
+  },
+
+  async createRide(data) {
+    const response = await api.post('/intercity/rides', data)
+    return response.data
+  },
+
+  async acceptRide(rideId) {
+    const response = await api.patch(`/intercity/rides/${rideId}/accept`)
     return response.data
   },
 }

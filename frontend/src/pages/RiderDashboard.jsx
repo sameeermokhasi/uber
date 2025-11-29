@@ -1,15 +1,17 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { Car, MapPin, Clock, DollarSign, LogOut, Plane, AlertCircle, CheckCircle, Navigation as NavIcon } from 'lucide-react'
+import { Car, MapPin, Clock, DollarSign, LogOut, Plane, AlertCircle, CheckCircle, Navigation as NavIcon, XCircle } from 'lucide-react'
 import { rideService } from '../services/api'
 import { useAuthStore } from '../store/authStore'
 import { websocketService } from '../services/websocket'
 import DriverRouteMap from '../components/DriverRouteMap'
+import VacationSchedulePlanner from '../components/VacationSchedulePlanner'
 
 export default function RiderDashboard() {
   const [rides, setRides] = useState([])
   const [loading, setLoading] = useState(true)
   const [driverLocations, setDriverLocations] = useState({})
+  const [showVacationPlanner, setShowVacationPlanner] = useState(false)
   const { user, logout } = useAuthStore()
 
   useEffect(() => {
@@ -34,10 +36,71 @@ export default function RiderDashboard() {
       } else if (data.type === 'ride_status_update') {
         // Refresh rides when status changes
         loadRides()
+        // Show notification based on status
+        const rideId = data.ride_id;
+        const status = data.status;
+        
+        // Show browser notification
+        if (Notification.permission === 'granted') {
+          let title = '';
+          let body = '';
+          
+          switch(status) {
+            case 'accepted':
+              title = 'Ride Accepted!';
+              body = 'A driver has accepted your ride request. Your driver is on the way!';
+              break;
+            case 'in_progress':
+              title = 'Ride Started!';
+              body = 'Your ride is now in progress. Enjoy your journey!';
+              break;
+            case 'completed':
+              title = 'Ride Completed!';
+              body = 'Your ride has been completed. Thank you for using our service!';
+              break;
+            case 'cancelled':
+              title = 'Ride Cancelled';
+              body = 'Your ride has been cancelled. We apologize for the inconvenience.';
+              break;
+            default:
+              return;
+          }
+          
+          new Notification(title, {
+            body: body,
+            icon: '/favicon.ico'
+          });
+        }
+        
+        // Show alert for critical status changes
+        switch(status) {
+          case 'accepted':
+            // Don't show alert for accepted as it might be disruptive
+            break;
+          case 'in_progress':
+            // Don't show alert for in_progress as it might be disruptive
+            break;
+          case 'completed':
+            alert('Your ride has been completed! Thank you for using our service.');
+            break;
+          case 'cancelled':
+            alert('Your ride has been cancelled by the driver. We apologize for the inconvenience.');
+            break;
+          default:
+            break;
+        }
+      } else if (data.type === 'vacation_status_update') {
+        // Refresh vacations when status changes
+        loadRides()
       }
     }
 
     websocketService.addListener('message', handleWebSocketMessage)
+    
+    // Request notification permission
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
     
     return () => {
       websocketService.removeListener('message', handleWebSocketMessage)
@@ -98,10 +161,28 @@ export default function RiderDashboard() {
     }
   }
 
-  // Get active ride (accepted or in_progress)
+  // Get active ride (accepted or in progress)
   const activeRide = rides.find(ride => 
     ride.status === 'accepted' || ride.status === 'in_progress'
   )
+
+  // Add useEffect to trigger notifications when ride status changes
+  useEffect(() => {
+    // This will be handled by WebSocket updates already
+  }, [rides])
+
+  const handleCancelRide = async (rideId) => {
+    if (window.confirm('Are you sure you want to cancel this ride?')) {
+      try {
+        await rideService.cancelRide(rideId);
+        alert('Ride cancelled successfully');
+        loadRides();
+      } catch (error) {
+        console.error('Failed to cancel ride:', error);
+        alert('Failed to cancel ride. Please try again.');
+      }
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -125,18 +206,29 @@ export default function RiderDashboard() {
       </header>
 
       <div className="container mx-auto px-6 py-8">
+        {/* Vacation Planner Toggle */}
+        <div className="mb-6">
+          <button
+            onClick={() => setShowVacationPlanner(!showVacationPlanner)}
+            className="btn-primary"
+          >
+            {showVacationPlanner ? 'Hide Vacation Planner' : 'Show Vacation Planner'}
+          </button>
+        </div>
+        
+        {/* Vacation Schedule Planner */}
+        {showVacationPlanner && (
+          <div className="mb-8">
+            <VacationSchedulePlanner />
+          </div>
+        )}
+        
         {/* Quick Actions */}
-        <div className="grid md:grid-cols-3 gap-6 mb-8">
+        <div className="grid md:grid-cols-2 gap-6 mb-8">
           <Link to="/rider/book" className="card hover:shadow-xl transition-all duration-300 text-center">
             <Car className="w-12 h-12 text-primary-600 mx-auto mb-3" />
             <h3 className="text-xl font-bold mb-2">Book Local Ride</h3>
             <p className="text-gray-600">Quick rides within your city</p>
-          </Link>
-
-          <Link to="/intercity" className="card hover:shadow-xl transition-all duration-300 text-center">
-            <MapPin className="w-12 h-12 text-primary-600 mx-auto mb-3" />
-            <h3 className="text-xl font-bold mb-2">Intercity Travel</h3>
-            <p className="text-gray-600">Book rides between cities</p>
           </Link>
 
           <Link to="/vacation" className="card hover:shadow-xl transition-all duration-300 text-center">
@@ -144,6 +236,7 @@ export default function RiderDashboard() {
             <h3 className="text-xl font-bold mb-2">Plan Vacation</h3>
             <p className="text-gray-600">Complete travel packages</p>
           </Link>
+          
         </div>
 
         {/* Active Ride with Real-time Map */}
@@ -162,6 +255,24 @@ export default function RiderDashboard() {
                 <span className={`${getStatusBadge(activeRide.status)} text-xs`}>
                   {activeRide.status.toUpperCase()}
                 </span>
+              </div>
+            </div>
+            
+            {/* Detailed Progress Bar */}
+            <div className="mb-6">
+              <div className="flex justify-between text-sm text-gray-600 mb-2">
+                <span>Requested</span>
+                <span>Accepted</span>
+                <span>In Progress</span>
+                <span>Completed</span>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-3">
+                <div className={`h-3 rounded-full transition-all duration-1000 ${
+                  activeRide.status === 'pending' ? 'bg-yellow-500 w-1/4' :
+                  activeRide.status === 'accepted' ? 'bg-blue-500 w-1/2' :
+                  activeRide.status === 'in_progress' ? 'bg-purple-500 w-3/4' :
+                  'bg-green-500 w-full'
+                }`}></div>
               </div>
             </div>
             
@@ -214,25 +325,23 @@ export default function RiderDashboard() {
                     </span>
                   </div>
                   
-                  {/* Progress Bar for Active Rides */}
-                  {(ride.status === 'pending' || ride.status === 'accepted' || ride.status === 'in_progress') && (
-                    <div className="mb-4">
-                      <div className="flex justify-between text-xs text-gray-600 mb-2">
-                        <span>Requested</span>
-                        <span>Accepted</span>
-                        <span>In Progress</span>
-                        <span>Completed</span>
-                      </div>
-                      <div className="w-full bg-gray-200 rounded-full h-2">
-                        <div className={`h-2 rounded-full transition-all duration-500 ${
-                          ride.status === 'pending' ? 'bg-yellow-500 w-1/4' :
-                          ride.status === 'accepted' ? 'bg-blue-500 w-1/2' :
-                          ride.status === 'in_progress' ? 'bg-purple-500 w-3/4' :
-                          'bg-green-500 w-full'
-                        }`}></div>
-                      </div>
+                  {/* Progress Bar for All Rides */}
+                  <div className="mb-4">
+                    <div className="flex justify-between text-xs text-gray-600 mb-2">
+                      <span>Requested</span>
+                      <span>Accepted</span>
+                      <span>In Progress</span>
+                      <span>Completed</span>
                     </div>
-                  )}
+                    <div className="w-full bg-gray-200 rounded-full h-3">
+                      <div className={`h-3 rounded-full transition-all duration-1000 ${
+                        ride.status === 'pending' ? 'bg-yellow-500 w-1/4' :
+                        ride.status === 'accepted' ? 'bg-blue-500 w-1/2' :
+                        ride.status === 'in_progress' ? 'bg-purple-500 w-3/4' :
+                        'bg-green-500 w-full'
+                      }`}></div>
+                    </div>
+                  </div>
                   
                   <div className="flex-1 mb-3">
                     <div className="flex items-center space-x-2 mb-2">
@@ -260,8 +369,37 @@ export default function RiderDashboard() {
                       </span>
                     )}
                   </div>
+                  {/* Cancel button for pending rides */}
+                  {ride.status === 'pending' && (
+                    <div className="mt-3 pt-3 border-t border-gray-200">
+                      <button
+                        onClick={() => handleCancelRide(ride.id)}
+                        className="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-2 rounded-lg transition-colors flex items-center justify-center"
+                      >
+                        <XCircle className="w-4 h-4 mr-2" />
+                        Cancel Ride
+                      </button>
+                    </div>
+                  )}
+                  {/* Special message for accepted rides */}
+                  {ride.status === 'accepted' && (
+                    <div className="mt-3 pt-3 border-t border-gray-200">
+                      <p className="text-sm text-blue-600 font-medium">
+                        🚗 Your driver is on the way! Please wait at the pickup location.
+                      </p>
+                    </div>
+                  )}
+                  {/* Special message for in_progress rides */}
+                  {ride.status === 'in_progress' && (
+                    <div className="mt-3 pt-3 border-t border-gray-200">
+                      <p className="text-sm text-purple-600 font-medium">
+                        🚙 Your ride is in progress. Enjoy your journey!
+                      </p>
+                    </div>
+                  )}
                 </div>
               ))}
+
             </div>
           )}
         </div>

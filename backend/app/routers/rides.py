@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_
 from typing import List, Optional
 import math
+from datetime import datetime
 
 from app.database import get_db
 from app.models import User, Ride, DriverProfile, RideStatus, UserRole
@@ -62,14 +63,22 @@ def find_nearby_drivers(db: Session, pickup_lat: float, pickup_lng: float, max_d
     
     nearby_drivers = []
     for driver in drivers:
-        if driver.driver_profile:
-            distance = calculate_distance(
-                pickup_lat, pickup_lng,
-                driver.driver_profile.current_lat,
-                driver.driver_profile.current_lng
-            )
-            if distance <= max_distance_km:
-                nearby_drivers.append(driver)
+        if driver.driver_profile and driver.driver_profile.current_lat is not None and driver.driver_profile.current_lng is not None:
+            try:
+                distance = calculate_distance(
+                    pickup_lat, pickup_lng,
+                    float(driver.driver_profile.current_lat),
+                    float(driver.driver_profile.current_lng)
+                )
+                if distance <= max_distance_km:
+                    nearby_drivers.append(driver)
+            except (ValueError, TypeError) as e:
+                print(f"Error calculating distance for driver {driver.id}: {e}")
+                continue
+    
+    print(f"Found {len(nearby_drivers)} nearby drivers for pickup at ({pickup_lat}, {pickup_lng})")
+    for driver in nearby_drivers:
+        print(f"  Driver {driver.id} at ({driver.driver_profile.current_lat}, {driver.driver_profile.current_lng})")
     
     return nearby_drivers
 
@@ -81,7 +90,7 @@ async def create_ride(
     db: Session = Depends(get_db)
 ):
     """Create a new ride request"""
-    if str(current_user.role) != UserRole.RIDER.value:
+    if current_user.role.value != UserRole.RIDER.value:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only riders can create ride requests"
@@ -119,29 +128,58 @@ async def create_ride(
     db.refresh(new_ride)
     
     # Find nearby drivers within 3km
+    print(f"=== FINDING NEARBY DRIVERS FOR RIDE {new_ride.id} ===")
+    print(f"Pickup location: ({ride_data.pickup_lat}, {ride_data.pickup_lng})")
     nearby_drivers = find_nearby_drivers(
         db, 
         float(ride_data.pickup_lat), 
         float(ride_data.pickup_lng), 
         max_distance_km=3.0
     )
+    print(f"Found {len(nearby_drivers)} nearby drivers")
     
     # Send WebSocket notification to nearby drivers
-    for driver in nearby_drivers:
-        # Refresh the driver to get actual values
-        db.refresh(driver)
+    if nearby_drivers:
+        print(f"Sending notifications to {len(nearby_drivers)} drivers")
+        notification_sent = False
+        for driver in nearby_drivers:
+            # Refresh the driver to get actual values
+            db.refresh(driver)
+            try:
+                print(f"Sending WebSocket message to driver {driver.id}")
+                await manager.send_personal_message({
+                    "type": "new_ride_request",
+                    "ride_id": new_ride.id,
+                    "pickup_address": new_ride.pickup_address,
+                    "destination_address": new_ride.destination_address,
+                    "distance_km": round(float(new_ride.distance_km or 0), 2),
+                    "estimated_fare": round(float(new_ride.estimated_fare or 0), 2),
+                    "vehicle_type": new_ride.vehicle_type.value if new_ride.vehicle_type is not None else "economy"
+                }, int(driver.id) if driver.id is not None else 0)
+                print(f"Successfully sent WebSocket message to driver {driver.id}")
+                notification_sent = True
+            except Exception as e:
+                print(f"Failed to send WebSocket message to driver {driver.id}: {e}")
+        
+        if not notification_sent:
+            print("WARNING: No notifications were successfully sent to drivers!")
+    else:
+        print("No nearby drivers found to notify")
+        # As a fallback, let's also broadcast to all connected drivers
         try:
-            await manager.send_personal_message({
+            print("Broadcasting ride request to all connected drivers as fallback")
+            await manager.broadcast({
                 "type": "new_ride_request",
                 "ride_id": new_ride.id,
                 "pickup_address": new_ride.pickup_address,
                 "destination_address": new_ride.destination_address,
-                "distance_km": round(float(str(new_ride.distance_km or 0)), 2),
-                "estimated_fare": round(float(str(new_ride.estimated_fare or 0)), 2),
-                "vehicle_type": str(new_ride.vehicle_type.value) if new_ride.vehicle_type is not None else "economy"
-            }, int(str(driver.id)) if driver.id is not None else 0)
+                "distance_km": round(float(new_ride.distance_km or 0), 2),
+                "estimated_fare": round(float(new_ride.estimated_fare or 0), 2),
+                "vehicle_type": new_ride.vehicle_type.value if new_ride.vehicle_type is not None else "economy"
+            })
+            print("Broadcast message sent to all connected drivers")
         except Exception as e:
-            print(f"Failed to send WebSocket message to driver {driver.id}: {e}")
+            print(f"Failed to broadcast ride request: {e}")
     
     return new_ride
 
@@ -154,25 +192,17 @@ async def get_rides(
     """Get rides for current user"""
     query = db.query(Ride)
     
-    if str(current_user.role) == UserRole.RIDER.value:
+    if current_user.role.value == UserRole.RIDER.value:
         query = query.filter(Ride.rider_id == current_user.id)
-    elif str(current_user.role) == UserRole.DRIVER.value:
+    elif current_user.role.value == UserRole.DRIVER.value:
+        # For drivers, show their assigned rides (accepted, in_progress, completed)
+        # and pending rides that they can accept
         query = query.filter(
             or_(
                 Ride.driver_id == current_user.id,
                 and_(
                     Ride.status == RideStatus.PENDING,
-                    Ride.id.in_(
-                        db.query(Ride.id)
-                        .join(User, Ride.rider_id == User.id)
-                        .join(DriverProfile, User.id == DriverProfile.user_id)
-                        .filter(
-                            DriverProfile.user_id == current_user.id,
-                            DriverProfile.is_available == True,
-                            DriverProfile.current_lat != None,
-                            DriverProfile.current_lng != None
-                        )
-                    )
+                    Ride.driver_id == None
                 )
             )
         )
@@ -194,13 +224,18 @@ async def get_available_rides(
     print(f"Current user email: {current_user.email}")
     print(f"Current user role: {current_user.role}")
     print(f"Current user role type: {type(current_user.role)}")
+    print(f"Current user role value: {current_user.role.value}")
     print(f"Expected driver role: {UserRole.DRIVER}")
     print(f"Expected driver value: {UserRole.DRIVER.value}")
-    print(f"Role comparison result: {str(current_user.role) != UserRole.DRIVER.value}")
+    print(f"Role comparison result: {str(current_user.role) == UserRole.DRIVER.value}")
+    print(f"Direct comparison: {current_user.role == UserRole.DRIVER}")
     
-    # Fix the role comparison - it was checking for NOT equal
-    if str(current_user.role) != UserRole.DRIVER.value:
+    # Fix the role comparison - use direct enum comparison
+    if current_user.role != UserRole.DRIVER:
         print(f"Role check failed. User is not a driver.")
+        print(f"User role: {current_user.role}")
+        print(f"User role value: {current_user.role.value}")
+        print(f"Expected role value: {UserRole.DRIVER.value}")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only drivers can view available rides"
@@ -215,13 +250,29 @@ async def get_available_rides(
     if driver_profile:
         print(f"Driver is available: {driver_profile.is_available}")
         print(f"Driver has location: {driver_profile.current_lat is not None and driver_profile.current_lng is not None}")
+        if driver_profile.current_lat is not None:
+            print(f"Driver lat: {driver_profile.current_lat} (type: {type(driver_profile.current_lat)})")
+        if driver_profile.current_lng is not None:
+            print(f"Driver lng: {driver_profile.current_lng} (type: {type(driver_profile.current_lng)})")
     
-    if not driver_profile or str(driver_profile.is_available) != 'True':
-        print("Driver not available or profile not found, returning empty list")
+    if not driver_profile:
+        print("Driver profile not found, returning empty list")
+        return []  # Return empty list if driver profile doesn't exist
+    
+    # Check if driver is available (convert to boolean properly)
+    is_available = driver_profile.is_available
+    if isinstance(is_available, str):
+        is_available = is_available.lower() == 'true'
+    
+    print(f"Driver availability check result: {is_available}")
+    if not is_available:
+        print("Driver not available, returning empty list")
         return []  # Return empty list if driver is not available
     
     if driver_profile.current_lat is None or driver_profile.current_lng is None:
         print("Driver location not set, returning empty list")
+        print(f"Current lat: {driver_profile.current_lat}")
+        print(f"Current lng: {driver_profile.current_lng}")
         return []  # Return empty list if driver location is not set
     
     # Get rides within 3km of driver's current location
@@ -230,16 +281,27 @@ async def get_available_rides(
         Ride.driver_id == None
     )
     
+    print(f"Total pending rides in system: {rides_query.count()}")
+    
     rides = []
     for ride in rides_query.all():
-        distance = calculate_distance(
-            float(str(ride.pickup_lat)), float(str(ride.pickup_lng)),
-            float(str(driver_profile.current_lat)), float(str(driver_profile.current_lng))
-        )
-        if distance <= 3.0:  # Within 3km
-            rides.append(ride)
+        try:
+            print(f"Checking ride {ride.id}: pickup ({ride.pickup_lat}, {ride.pickup_lng})")
+            distance = calculate_distance(
+                float(ride.pickup_lat), float(ride.pickup_lng),
+                float(driver_profile.current_lat), float(driver_profile.current_lng)
+            )
+            print(f"Distance to ride {ride.id}: {distance} km")
+            if distance <= 3.0:  # Within 3km
+                rides.append(ride)
+                print(f"Ride {ride.id} added to available list")
+        except Exception as e:
+            print(f"Error calculating distance for ride {ride.id}: {e}")
+            continue
     
-    print(f"Found {len(rides)} available rides")
+    print(f"Found {len(rides)} available rides within 3km")
+    for ride in rides:
+        print(f"  Ride {ride.id}: {ride.pickup_address} -> {ride.destination_address}")
     print("=== END GET AVAILABLE RIDES DEBUG ===")
     return rides
 
@@ -259,12 +321,12 @@ async def get_ride(
         )
     
     # Check authorization
-    if str(current_user.role) == UserRole.RIDER.value and str(ride.rider_id) != str(current_user.id):
+    if current_user.role.value == UserRole.RIDER.value and str(ride.rider_id) != str(current_user.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to view this ride"
         )
-    elif str(current_user.role) == UserRole.DRIVER.value and str(ride.driver_id) != str(current_user.id):
+    elif current_user.role.value == UserRole.DRIVER.value and str(ride.driver_id) != str(current_user.id):
         if str(ride.status) != RideStatus.PENDING.value:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -290,55 +352,155 @@ async def update_ride(
         )
     
     # Handle driver accepting ride
-    if str(ride_update.status) == RideStatus.ACCEPTED.value and str(current_user.role) == UserRole.DRIVER.value:
-        if str(ride.status) != RideStatus.PENDING.value:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Ride is not available"
-            )
-        ride.driver_id = current_user.id
-        ride.status = str(RideStatus.ACCEPTED.value)
+    print(f"=== DEBUG RIDE UPDATE ===")
+    print(f"Ride update status: {ride_update.status}")
+    print(f"Ride update status type: {type(ride_update.status)}")
+    print(f"Current user role: {current_user.role}")
+    print(f"Current user role value: {current_user.role.value}")
+    print(f"UserRole.DRIVER.value: {UserRole.DRIVER.value}")
+    print(f"Ride current status: {ride.status}")
+    print(f"Ride current status value: {ride.status.value}")
+    print(f"RideStatus.PENDING.value: {RideStatus.PENDING.value}")
     
-    # Handle cancellation
-    elif str(ride_update.status) == RideStatus.CANCELLED.value:
-        if str(current_user.role) == UserRole.RIDER.value and str(ride.rider_id) != str(current_user.id):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized"
-            )
-        ride.status = str(RideStatus.CANCELLED.value)
-    
-    # Handle ride completion
-    elif str(ride_update.status) == RideStatus.COMPLETED.value:
-        if str(current_user.role) == UserRole.DRIVER.value and str(ride.driver_id) == str(current_user.id):
-            ride.status = str(RideStatus.COMPLETED.value)
-            if ride_update.final_fare:
-                ride.final_fare = float(str(ride_update.final_fare))
+    # Handle driver accepting ride
+    if ride_update.status == RideStatus.ACCEPTED:
+        print("Processing ride acceptance")
+        if current_user.role == UserRole.DRIVER:
+            print("User is a driver")
+            if ride.status == RideStatus.PENDING:
+                print("Ride is pending, accepting ride")
+                ride.driver_id = current_user.id
+                ride.status = RideStatus.ACCEPTED
+                print(f"Ride accepted. Driver ID: {ride.driver_id}, Status: {ride.status}")
             else:
-                ride.final_fare = float(str(ride.estimated_fare))
-            
-            # Update driver stats
-            driver_profile = db.query(DriverProfile).filter(
-                DriverProfile.user_id == current_user.id
-            ).first()
-            if driver_profile:
-                driver_profile.total_rides = int(str(driver_profile.total_rides)) + 1
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Ride is not available for acceptance"
+                )
         else:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized"
+                detail="Only drivers can accept rides"
+            )
+    
+    # Handle driver starting ride
+    elif ride_update.status == RideStatus.IN_PROGRESS:
+        print("Processing ride start")
+        if current_user.role == UserRole.DRIVER and str(ride.driver_id) == str(current_user.id):
+            print("User is the assigned driver")
+            if ride.status == RideStatus.ACCEPTED:
+                print("Ride is accepted, starting ride")
+                ride.status = RideStatus.IN_PROGRESS
+                ride.started_at = datetime.utcnow()
+                print(f"Ride started. Status: {ride.status}")
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Ride must be accepted before starting"
+                )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the assigned driver can start this ride"
+            )
+    
+    # Handle driver completing ride
+    elif ride_update.status == RideStatus.COMPLETED:
+        print("Processing ride completion")
+        if current_user.role == UserRole.DRIVER and str(ride.driver_id) == str(current_user.id):
+            print("User is the assigned driver")
+            if ride.status == RideStatus.IN_PROGRESS:
+                print("Ride is in progress, completing ride")
+                ride.status = RideStatus.COMPLETED
+                ride.completed_at = datetime.utcnow()
+                if ride_update.final_fare:
+                    ride.final_fare = float(ride_update.final_fare)
+                else:
+                    ride.final_fare = float(ride.estimated_fare)
+                
+                # Update driver stats
+                driver_profile = db.query(DriverProfile).filter(
+                    DriverProfile.user_id == current_user.id
+                ).first()
+                if driver_profile:
+                    driver_profile.total_rides = int(driver_profile.total_rides) + 1
+                print(f"Ride completed. Status: {ride.status}")
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Ride must be in progress before completing"
+                )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the assigned driver can complete this ride"
+            )
+    
+    # Handle rider cancelling ride or driver rejecting ride
+    elif ride_update.status == RideStatus.CANCELLED:
+        print("Processing ride cancellation/rejection")
+        if current_user.role == UserRole.RIDER and str(ride.rider_id) == str(current_user.id):
+            print("User is the rider")
+            if ride.status in [RideStatus.PENDING, RideStatus.ACCEPTED]:
+                print("Ride can be cancelled")
+                ride.status = RideStatus.CANCELLED
+                print(f"Ride cancelled. Status: {ride.status}")
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot cancel ride at this stage"
+                )
+        elif current_user.role == UserRole.DRIVER and str(ride.driver_id) == str(current_user.id):
+            print("User is the driver")
+            if ride.status == RideStatus.ACCEPTED:
+                print("Driver rejecting ride")
+                ride.status = RideStatus.PENDING
+                ride.driver_id = None
+                print(f"Ride rejected. Status: {ride.status}, Driver ID: {ride.driver_id}")
+                
+                # Notify other nearby drivers about the ride becoming available again
+                nearby_drivers = find_nearby_drivers(
+                    db, 
+                    float(ride.pickup_lat), 
+                    float(ride.pickup_lng), 
+                    max_distance_km=3.0
+                )
+                
+                for driver in nearby_drivers:
+                    if str(driver.id) != str(current_user.id):  # Don't notify the rejecting driver
+                        try:
+                            await manager.send_personal_message({
+                                "type": "new_ride_request",
+                                "ride_id": ride.id,
+                                "pickup_address": ride.pickup_address,
+                                "destination_address": ride.destination_address,
+                                "distance_km": round(float(ride.distance_km or 0), 2),
+                                "estimated_fare": round(float(ride.estimated_fare or 0), 2),
+                                "vehicle_type": ride.vehicle_type.value if ride.vehicle_type is not None else "economy"
+                            }, int(driver.id) if driver.id is not None else 0)
+                        except Exception as e:
+                            print(f"Failed to send WebSocket message to driver {driver.id}: {e}")
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot reject ride at this stage"
+                )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to cancel/reject this ride"
             )
     
     db.commit()
     db.refresh(ride)
     
     # Send WebSocket notification to rider
-    if str(ride_update.status) in [RideStatus.ACCEPTED.value, RideStatus.IN_PROGRESS.value, RideStatus.COMPLETED.value, RideStatus.CANCELLED.value]:
+    if ride_update.status in [RideStatus.ACCEPTED, RideStatus.IN_PROGRESS, RideStatus.COMPLETED, RideStatus.CANCELLED]:
         await manager.send_personal_message({
             "type": "ride_status_update",
             "ride_id": ride.id,
-            "status": str(ride.status.value)
-        }, int(str(ride.rider_id)) if ride.rider_id is not None else 0)
+            "status": str(ride.status)
+        }, int(ride.rider_id) if ride.rider_id is not None else 0)
     
     return ride
 
@@ -413,19 +575,23 @@ async def cancel_ride(
             detail="Ride not found"
         )
     
-    if str(ride.rider_id) != str(current_user.id):
+    # Check if the current user is the rider who booked the ride
+    if ride.rider_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to cancel this ride"
         )
     
+    # Check if the ride is in a cancellable state
     if str(ride.status) in [RideStatus.COMPLETED.value, RideStatus.CANCELLED.value]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot cancel this ride"
         )
     
-    ride.status = str(RideStatus.CANCELLED.value)
+    # Cancel the ride
+    ride.status = RideStatus.CANCELLED.value
     db.commit()
-    
+
     return None
+

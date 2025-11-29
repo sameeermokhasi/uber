@@ -10,7 +10,13 @@ from app.config import settings
 from app.database import get_db
 from app.models import User
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Handle bcrypt version issue
+try:
+    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+except AttributeError:
+    # Fallback if there's an issue with bcrypt version detection
+    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__backends=["bcrypt"])
+
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login")
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:

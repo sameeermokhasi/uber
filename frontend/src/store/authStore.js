@@ -5,13 +5,21 @@ const getRoleFromUrl = () => {
   if (typeof window === 'undefined') return 'rider'
   
   const port = window.location.port
+  console.log('=== ROLE DETECTION ===')
+  console.log('Current port:', port)
+  console.log('Window location:', window.location)
+  console.log('=== END ROLE DETECTION ===')
+  
+  // Check for rider ports (5000, 5001, 5002 in case Vite auto-assigns a different port)
+  if (port === '5000' || port === '5001' || port === '5002') return 'rider'
   if (port === '6001') return 'driver' // Changed from 6000 to 6001
   if (port === '7001') return 'admin'
-  return 'rider' // default
+  return 'rider' // default fallback
 }
 
 const getStorageKey = () => {
   const role = getRoleFromUrl()
+  console.log('Storage key role:', role); // Debug log
   return `auth-storage-${role}`
 }
 
@@ -26,14 +34,14 @@ export const useAuthStore = create(
       const storageKey = getStorageKey()
       localStorage.setItem(`${storageKey}-token`, token)
       localStorage.setItem(`${storageKey}-user`, JSON.stringify(user))
-      set({ token, user, isAuthenticated: true, role: user.role })
+      set({ token, user, isAuthenticated: true, role: getRoleFromUrl() })
     },
     
     logout: () => {
       const storageKey = getStorageKey()
       localStorage.removeItem(`${storageKey}-token`)
       localStorage.removeItem(`${storageKey}-user`)
-      set({ token: null, user: null, isAuthenticated: false })
+      set({ token: null, user: null, isAuthenticated: false, role: getRoleFromUrl() })
     },
     
     updateUser: (user) => set({ user }),
@@ -47,7 +55,7 @@ export const useAuthStore = create(
       if (token && userStr) {
         try {
           const user = JSON.parse(userStr)
-          set({ token, user, isAuthenticated: true, role: user.role })
+          set({ token, user, isAuthenticated: true, role: getRoleFromUrl() })
         } catch (e) {
           console.error('Failed to parse user from storage:', e)
           // Clear invalid storage
@@ -65,7 +73,7 @@ export const useAuthStore = create(
         localStorage.removeItem(`auth-storage-${role}-token`)
         localStorage.removeItem(`auth-storage-${role}-user`)
       })
-      set({ token: null, user: null, isAuthenticated: false })
+      set({ token: null, user: null, isAuthenticated: false, role: getRoleFromUrl() })
     }
   })
 )

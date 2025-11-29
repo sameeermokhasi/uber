@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { Users, Car, MapPin, Plane, Calendar, DollarSign, LogOut, CheckCircle, XCircle } from 'lucide-react'
-import { adminService, vacationService } from '../services/api'
+import { Users, Car, MapPin, Plane, Calendar, DollarSign, LogOut, CheckCircle, XCircle, Activity, Bell, Clock } from 'lucide-react'
+import { adminService, vacationService, rideService } from '../services/api'
 import { useAuthStore } from '../store/authStore'
 
 export default function AdminDashboard() {
@@ -12,24 +12,34 @@ export default function AdminDashboard() {
   })
   const [users, setUsers] = useState([])
   const [vacations, setVacations] = useState([])
+  const [rides, setRides] = useState([])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('overview')
   const { logout } = useAuthStore()
 
   useEffect(() => {
     loadData()
+    
+    // Set up interval to refresh data every 30 seconds
+    const interval = setInterval(() => {
+      loadData()
+    }, 30000)
+    
+    return () => clearInterval(interval)
   }, [])
 
   const loadData = async () => {
     try {
-      const [statsData, usersData, vacationsData] = await Promise.all([
+      const [statsData, usersData, vacationsData, ridesData] = await Promise.all([
         adminService.getStats(),
         adminService.getUsers(),
-        vacationService.getVacations()
+        vacationService.getVacations(),
+        rideService.getRides()
       ])
       setStats(statsData)
       setUsers(usersData)
       setVacations(vacationsData)
+      setRides(ridesData)
     } catch (error) {
       console.error('Failed to load data:', error)
     } finally {
@@ -78,6 +88,68 @@ export default function AdminDashboard() {
         console.error('Failed to cancel vacation:', error)
         alert('Failed to cancel vacation. Please try again.')
       }
+    }
+  }
+
+  // Get recent activity for the dashboard
+  const getRecentActivity = () => {
+    const activity = []
+    
+    // Add ride activities
+    rides.slice(0, 10).forEach(ride => {
+      activity.push({
+        id: `ride-${ride.id}`,
+        type: 'ride',
+        action: ride.status,
+        user: ride.rider?.name || 'Unknown Rider',
+        timestamp: ride.created_at,
+        details: `${ride.pickup_address} to ${ride.destination_address}`
+      })
+    })
+    
+    // Add vacation activities
+    vacations.slice(0, 10).forEach(vacation => {
+      activity.push({
+        id: `vacation-${vacation.id}`,
+        type: 'vacation',
+        action: vacation.status,
+        user: vacation.user?.name || 'Unknown User',
+        timestamp: vacation.created_at,
+        details: `Trip to ${vacation.destination}`
+      })
+    })
+    
+    // Sort by timestamp
+    return activity.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 15)
+  }
+
+  const getActivityIcon = (type, action) => {
+    if (type === 'ride') {
+      if (action === 'accepted') return <CheckCircle className="w-5 h-5 text-green-500" />
+      if (action === 'in_progress') return <Activity className="w-5 h-5 text-blue-500" />
+      if (action === 'completed') return <CheckCircle className="w-5 h-5 text-purple-500" />
+      if (action === 'cancelled') return <XCircle className="w-5 h-5 text-red-500" />
+      return <Car className="w-5 h-5 text-gray-500" />
+    } else {
+      if (action === 'confirmed') return <CheckCircle className="w-5 h-5 text-green-500" />
+      if (action === 'pending') return <Clock className="w-5 h-5 text-yellow-500" />
+      if (action === 'cancelled') return <XCircle className="w-5 h-5 text-red-500" />
+      return <Plane className="w-5 h-5 text-gray-500" />
+    }
+  }
+
+  const getActivityColor = (type, action) => {
+    if (type === 'ride') {
+      if (action === 'accepted') return 'bg-green-100 text-green-800'
+      if (action === 'in_progress') return 'bg-blue-100 text-blue-800'
+      if (action === 'completed') return 'bg-purple-100 text-purple-800'
+      if (action === 'cancelled') return 'bg-red-100 text-red-800'
+      return 'bg-gray-100 text-gray-800'
+    } else {
+      if (action === 'confirmed') return 'bg-green-100 text-green-800'
+      if (action === 'pending') return 'bg-yellow-100 text-yellow-800'
+      if (action === 'cancelled') return 'bg-red-100 text-red-800'
+      return 'bg-gray-100 text-gray-800'
     }
   }
 
@@ -131,6 +203,26 @@ export default function AdminDashboard() {
             }`}
           >
             Vacation Bookings
+          </button>
+          <button
+            onClick={() => setActiveTab('rides')}
+            className={`pb-3 px-1 font-medium ${
+              activeTab === 'rides'
+                ? 'text-primary-600 border-b-2 border-primary-600'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Ride Management
+          </button>
+          <button
+            onClick={() => setActiveTab('activity')}
+            className={`pb-3 px-1 font-medium ${
+              activeTab === 'activity'
+                ? 'text-primary-600 border-b-2 border-primary-600'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Recent Activity
           </button>
         </div>
 
@@ -186,6 +278,42 @@ export default function AdminDashboard() {
                 </div>
               </div>
             )}
+            
+            {/* Recent Activity Preview */}
+            <div className="card">
+              <h2 className="text-2xl font-bold mb-6 flex items-center">
+                <Activity className="w-6 h-6 mr-2" />
+                Recent Activity
+              </h2>
+              
+              {loading ? (
+                <div className="text-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto"></div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {getRecentActivity().slice(0, 5).map((activity) => (
+                    <div key={activity.id} className="flex items-center p-4 bg-gray-50 rounded-lg">
+                      <div className="mr-4">
+                        {getActivityIcon(activity.type, activity.action)}
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex justify-between">
+                          <p className="font-medium">{activity.user}</p>
+                          <span className="text-sm text-gray-500">
+                            {new Date(activity.timestamp).toLocaleTimeString()}
+                          </span>
+                        </div>
+                        <p className="text-sm text-gray-600">{activity.details}</p>
+                        <span className={`inline-block mt-1 px-2 py-1 text-xs rounded-full ${getActivityColor(activity.type, activity.action)}`}>
+                          {activity.type === 'ride' ? 'Ride' : 'Vacation'}: {activity.action}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -199,78 +327,67 @@ export default function AdminDashboard() {
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto"></div>
               </div>
             ) : (
-              <div className="card">
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          User
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Role
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Status
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Actions
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {users.map((user) => (
-                        <tr key={user.id}>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="flex items-center">
-                              <div className="flex-shrink-0 h-10 w-10">
-                                <div className="h-10 w-10 rounded-full bg-primary-100 flex items-center justify-center">
-                                  <span className="text-primary-600 font-bold">
-                                    {user.name.charAt(0)}
-                                  </span>
-                                </div>
-                              </div>
-                              <div className="ml-4">
-                                <div className="text-sm font-medium text-gray-900">{user.name}</div>
-                                <div className="text-sm text-gray-500">{user.email}</div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User</th>
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {users.map((user) => (
+                      <tr key={user.id}>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex items-center">
+                            <div className="flex-shrink-0 h-10 w-10">
+                              <div className="h-10 w-10 rounded-full bg-primary-100 flex items-center justify-center">
+                                <span className="text-primary-600 font-bold">{user.name.charAt(0)}</span>
                               </div>
                             </div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className={`badge ${
-                              user.role === 'admin' ? 'badge-primary' :
-                              user.role === 'driver' ? 'badge-warning' :
-                              'badge-secondary'
-                            }`}>
-                              {user.role}
+                            <div className="ml-4">
+                              <div className="text-sm font-medium text-gray-900">{user.name}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{user.email}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
+                            {user.role}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {user.is_active ? (
+                            <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
+                              Active
                             </span>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className={`badge ${
-                              user.is_active ? 'badge-success' : 'badge-danger'
-                            }`}>
-                              {user.is_active ? 'Active' : 'Inactive'}
+                          ) : (
+                            <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">
+                              Inactive
                             </span>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                            <button
-                              onClick={() => handleToggleUserActive(user.id)}
-                              className="text-indigo-600 hover:text-indigo-900 mr-3"
-                            >
-                              {user.is_active ? 'Deactivate' : 'Activate'}
-                            </button>
-                            <button
-                              onClick={() => handleDeleteUser(user.id)}
-                              className="text-red-600 hover:text-red-900"
-                            >
-                              Delete
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                          <button
+                            onClick={() => handleToggleUserActive(user.id)}
+                            className="text-indigo-600 hover:text-indigo-900 mr-3"
+                          >
+                            {user.is_active ? 'Deactivate' : 'Activate'}
+                          </button>
+                          <button
+                            onClick={() => handleDeleteUser(user.id)}
+                            className="text-red-600 hover:text-red-900"
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>
@@ -286,100 +403,165 @@ export default function AdminDashboard() {
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto"></div>
               </div>
             ) : (
-              <div className="space-y-4">
-                {vacations.length === 0 ? (
-                  <div className="text-center py-12">
-                    <Plane className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                    <p className="text-gray-500">No vacation bookings found</p>
-                  </div>
-                ) : (
-                  vacations.map((vacation) => (
-                    <div key={vacation.id} className={`border rounded-lg p-4 ${
-                      vacation.status === 'pending' ? 'border-yellow-300 bg-yellow-50' :
-                      vacation.status === 'confirmed' ? 'border-green-300 bg-green-50' :
-                      'border-gray-300 bg-gray-50'
-                    }`}>
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="flex items-center space-x-2">
-                          <MapPin className="w-5 h-5 text-primary-600" />
-                          <h3 className="text-lg font-bold">{vacation.destination}</h3>
-                        </div>
-                        <span className={`badge ${
-                          vacation.status === 'pending' ? 'badge-warning' :
-                          vacation.status === 'confirmed' ? 'badge-success' :
-                          'badge-secondary'
-                        }`}>
-                          {vacation.status}
-                        </span>
+              <div className="grid md:grid-cols-2 gap-6">
+                {vacations.map((vacation) => (
+                  <div key={vacation.id} className="card">
+                    <div className="flex justify-between items-start mb-4">
+                      <div>
+                        <h3 className="text-xl font-bold">{vacation.destination}</h3>
+                        <p className="text-sm text-gray-600">Booking #{vacation.booking_reference}</p>
                       </div>
-                      
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-                        <div>
-                          <p className="text-sm text-gray-600">Booking Ref</p>
-                          <p className="font-medium">#{vacation.booking_reference}</p>
-                        </div>
-                        <div>
-                          <p className="text-sm text-gray-600">Dates</p>
-                          <p className="font-medium">
-                            {new Date(vacation.start_date).toLocaleDateString()} - {new Date(vacation.end_date).toLocaleDateString()}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-sm text-gray-600">Travelers</p>
-                          <p className="font-medium">{vacation.passengers}</p>
-                        </div>
-                        <div>
-                          <p className="text-sm text-gray-600">Price</p>
-                          <p className="font-bold text-primary-600">₹{vacation.total_price.toFixed(2)}</p>
-                        </div>
+                      <span className={`badge ${
+                        vacation.status === 'confirmed' ? 'badge-success' : 
+                        vacation.status === 'pending' ? 'badge-warning' :
+                        vacation.status === 'cancelled' ? 'badge-danger' : 'badge'
+                      }`}>
+                        {vacation.status}
+                      </span>
+                    </div>
+                    
+                    <div className="space-y-2 mb-4">
+                      <div className="flex items-center text-sm text-gray-600">
+                        <Calendar className="w-4 h-4 mr-2" />
+                        {new Date(vacation.start_date).toLocaleDateString()} - {new Date(vacation.end_date).toLocaleDateString()}
                       </div>
-                      
-                      <div className="flex items-center space-x-4 text-sm mb-4">
-                        {vacation.ride_included && (
-                          <span className="flex items-center text-green-600">
-                            <Car className="w-4 h-4 mr-1" />
-                            Transport
-                          </span>
-                        )}
-                        {vacation.hotel_included && (
-                          <span className="flex items-center text-green-600">
-                            <Plane className="w-4 h-4 mr-1" />
-                            Hotel
-                          </span>
-                        )}
+                      <div className="flex items-center text-sm text-gray-600">
+                        <Users className="w-4 h-4 mr-2" />
+                        {vacation.passengers} travelers
                       </div>
-                      
-                      <div className="flex justify-end space-x-3">
-                        {vacation.status === 'pending' && (
-                          <>
-                            <button
-                              onClick={() => handleConfirmVacation(vacation.id)}
-                              className="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors flex items-center"
-                            >
-                              <CheckCircle className="w-4 h-4 mr-2" />
-                              Confirm
-                            </button>
-                            <button
-                              onClick={() => handleCancelVacation(vacation.id)}
-                              className="bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors flex items-center"
-                            >
-                              <XCircle className="w-4 h-4 mr-2" />
-                              Cancel
-                            </button>
-                          </>
-                        )}
-                        {vacation.status === 'confirmed' && (
-                          <button
-                            onClick={() => handleCancelVacation(vacation.id)}
-                            className="bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors flex items-center"
-                          >
-                            <XCircle className="w-4 h-4 mr-2" />
-                            Cancel
-                          </button>
-                        )}
+                      <div className="flex items-center text-sm text-gray-600">
+                        <DollarSign className="w-4 h-4 mr-2" />
+                        ₹{vacation.total_price?.toFixed(2)}
                       </div>
                     </div>
-                  ))
+                    
+                    <div className="flex space-x-2">
+                      {vacation.status === 'pending' && (
+                        <>
+                          <button
+                            onClick={() => handleConfirmVacation(vacation.id)}
+                            className="btn-sm btn-success"
+                          >
+                            Confirm
+                          </button>
+                          <button
+                            onClick={() => handleCancelVacation(vacation.id)}
+                            className="btn-sm btn-danger"
+                          >
+                            Cancel
+                          </button>
+                        </>
+                      )}
+                      {vacation.status === 'confirmed' && (
+                        <button
+                          onClick={() => handleCancelVacation(vacation.id)}
+                          className="btn-sm btn-danger"
+                        >
+                          Cancel Booking
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Rides Tab */}
+        {activeTab === 'rides' && (
+          <div>
+            <h1 className="text-3xl font-bold mb-8">Ride Management</h1>
+            
+            {loading ? (
+              <div className="text-center py-12">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto"></div>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ride ID</th>
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rider</th>
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Driver</th>
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Route</th>
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                      <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Fare</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {rides.map((ride) => (
+                      <tr key={ride.id}>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">#{ride.id}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ride.rider?.name || 'N/A'}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ride.driver?.name || 'Unassigned'}</td>
+                        <td className="px-6 py-4 text-sm text-gray-500">
+                          <div className="max-w-xs truncate">
+                            {ride.pickup_address} → {ride.destination_address}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                            ride.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                            ride.status === 'accepted' ? 'bg-blue-100 text-blue-800' :
+                            ride.status === 'in_progress' ? 'bg-purple-100 text-purple-800' :
+                            ride.status === 'completed' ? 'bg-green-100 text-green-800' :
+                            'bg-red-100 text-red-800'
+                          }`}>
+                            {ride.status}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">₹{ride.estimated_fare?.toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Activity Tab */}
+        {activeTab === 'activity' && (
+          <div>
+            <h1 className="text-3xl font-bold mb-8">Recent Activity</h1>
+            
+            {loading ? (
+              <div className="text-center py-12">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto"></div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {getRecentActivity().map((activity) => (
+                  <div key={activity.id} className="card">
+                    <div className="flex items-start">
+                      <div className="mr-4 mt-1">
+                        {getActivityIcon(activity.type, activity.action)}
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex justify-between">
+                          <h3 className="font-bold text-lg">{activity.user}</h3>
+                          <span className="text-sm text-gray-500">
+                            {new Date(activity.timestamp).toLocaleString()}
+                          </span>
+                        </div>
+                        <p className="text-gray-600 mt-1">{activity.details}</p>
+                        <div className="flex items-center mt-2">
+                          <span className={`inline-block px-3 py-1 text-sm rounded-full ${getActivityColor(activity.type, activity.action)}`}>
+                            {activity.type === 'ride' ? 'Ride' : 'Vacation'}: {activity.action}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                
+                {getRecentActivity().length === 0 && (
+                  <div className="text-center py-12">
+                    <Bell className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                    <p className="text-gray-500">No recent activity</p>
+                  </div>
                 )}
               </div>
             )}

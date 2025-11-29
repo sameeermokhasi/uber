@@ -138,23 +138,51 @@ async def create_intercity_ride(
 
 @router.get("/rides", response_model=List[IntercityRideResponse])
 async def get_intercity_rides(
+    status: str = None,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     """Get intercity rides for current user"""
+    query = db.query(IntercityRide)
+    
+    if status:
+        # Convert string to enum
+        try:
+            status_enum = RideStatus(status.lower())
+            query = query.filter(IntercityRide.status == status_enum)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid status value"
+            )
+    
     if current_user.role == UserRole.RIDER:
-        rides = db.query(IntercityRide).filter(
-            IntercityRide.rider_id == current_user.id
-        ).order_by(IntercityRide.scheduled_date.desc()).all()
+        query = query.filter(IntercityRide.rider_id == current_user.id)
     elif current_user.role == UserRole.DRIVER:
-        rides = db.query(IntercityRide).filter(
+        # For drivers, show their rides and pending rides
+        query = query.filter(
             (IntercityRide.driver_id == current_user.id) | 
             (IntercityRide.status == RideStatus.PENDING)
-        ).order_by(IntercityRide.scheduled_date.desc()).all()
-    else:
-        rides = db.query(IntercityRide).order_by(
-            IntercityRide.scheduled_date.desc()
-        ).all()
+        )
+    
+    rides = query.order_by(IntercityRide.scheduled_date.desc()).all()
+    return rides
+
+@router.get("/rides/available", response_model=List[IntercityRideResponse])
+async def get_available_intercity_rides(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get available intercity rides for drivers"""
+    if current_user.role != UserRole.DRIVER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only drivers can view available rides"
+        )
+    
+    rides = db.query(IntercityRide).filter(
+        IntercityRide.status == RideStatus.PENDING
+    ).order_by(IntercityRide.scheduled_date.desc()).all()
     
     return rides
 
@@ -192,3 +220,38 @@ async def accept_intercity_ride(
     db.refresh(ride)
     
     return {"message": "Intercity ride accepted successfully", "ride": ride}
+
+@router.patch("/rides/{ride_id}/reject")
+async def reject_intercity_ide(
+    ride_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Reject an intercity ride (Driver only)"""
+    if current_user.role != UserRole.DRIVER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only drivers can reject rides"
+        )
+    
+    ride = db.query(IntercityRide).filter(IntercityRide.id == ride_id).first()
+    
+    if not ride:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ride not found"
+        )
+    
+    if ride.status != RideStatus.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Ride is not available for rejection"
+        )
+    
+    # Just reset the ride to be available for other drivers
+    # In a real implementation, you might want to notify the rider
+    
+    db.commit()
+    db.refresh(ride)
+    
+    return {"message": "Intercity ride rejected successfully", "ride": ride}

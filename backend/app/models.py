@@ -150,6 +150,12 @@ class Vacation(Base):
     booking_reference = Column(String, unique=True, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
+    # New fields for automated schedule-based trip planner
+    schedule = Column(Text, nullable=True)  # JSON string containing the full trip schedule
+    flight_details = Column(Text, nullable=True)  # JSON string containing flight/train details
+    activities = Column(Text, nullable=True)  # JSON string containing activities schedule
+    meal_preferences = Column(Text, nullable=True)  # JSON string containing meal timings
+    
     # Relationships
     user = relationship("User", back_populates="vacations")
 

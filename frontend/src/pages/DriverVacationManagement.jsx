@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plane, Hotel, Car, Calendar, Users, MapPin, CheckCircle, XCircle } from 'lucide-react'
+import { Plane, Hotel, Car, Calendar, Users, MapPin, CheckCircle, XCircle, Clock, Utensils } from 'lucide-react'
 import { vacationService } from '../services/api'
 
 export default function DriverVacationManagement() {
@@ -33,6 +33,15 @@ export default function DriverVacationManagement() {
     }
   }
 
+  // Parse schedule data if available
+  const parseSchedule = (scheduleJson) => {
+    try {
+      return JSON.parse(scheduleJson);
+    } catch (e) {
+      return null;
+    }
+  }
+
   return (
     <div className="card mt-8">
       <h2 className="text-2xl font-bold mb-6">🏖️ Pending Vacation Bookings</h2>
@@ -48,71 +57,106 @@ export default function DriverVacationManagement() {
         </div>
       ) : (
         <div className="space-y-4">
-          {pendingVacations.map((vacation) => (
-            <div key={vacation.id} className="border-2 border-purple-300 bg-purple-50 rounded-lg p-4 shadow-md">
-              <div className="flex items-center justify-between mb-3">
-                <span className="badge badge-warning">⏳ PENDING CONFIRMATION</span>
-                <span className="text-sm text-gray-600">#{vacation.booking_reference}</span>
-              </div>
-              
-              <div className="mb-4">
-                <div className="flex items-center space-x-2 mb-2">
-                  <MapPin className="w-4 h-4 text-primary-600" />
-                  <h3 className="text-lg font-bold">{vacation.destination}</h3>
+          {pendingVacations.map((vacation) => {
+            const schedule = vacation.schedule ? parseSchedule(vacation.schedule) : null;
+            
+            return (
+              <div key={vacation.id} className="border-2 border-purple-300 bg-purple-50 rounded-lg p-4 shadow-md">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="badge badge-warning">⏳ PENDING CONFIRMATION</span>
+                  <span className="text-sm text-gray-600">#{vacation.booking_reference}</span>
                 </div>
                 
-                <div className="grid grid-cols-2 gap-4 mt-3">
-                  <div>
-                    <p className="text-sm text-gray-600">Dates</p>
-                    <p className="font-medium">
-                      {new Date(vacation.start_date).toLocaleDateString()} - {new Date(vacation.end_date).toLocaleDateString()}
-                    </p>
+                <div className="mb-4">
+                  <div className="flex items-center space-x-2 mb-2">
+                    <MapPin className="w-4 h-4 text-primary-600" />
+                    <h3 className="text-lg font-bold">{vacation.destination}</h3>
                   </div>
-                  <div>
-                    <p className="text-sm text-gray-600">Travelers</p>
-                    <p className="font-medium">{vacation.passengers}</p>
+                  
+                  <div className="grid grid-cols-2 gap-4 mt-3">
+                    <div>
+                      <p className="text-sm text-gray-600">Dates</p>
+                      <p className="font-medium">
+                        {new Date(vacation.start_date).toLocaleDateString()} - {new Date(vacation.end_date).toLocaleDateString()}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-600">Travelers</p>
+                      <p className="font-medium">{vacation.passengers}</p>
+                    </div>
                   </div>
-                </div>
-                
-                {vacation.hotel_name && (
-                  <div className="mt-3">
-                    <p className="text-sm text-gray-600">Hotel</p>
-                    <p className="font-medium">{vacation.hotel_name}</p>
-                  </div>
-                )}
-                
-                <div className="flex items-center space-x-4 mt-3 text-sm">
-                  {vacation.ride_included && (
-                    <span className="flex items-center text-green-600">
-                      <Car className="w-4 h-4 mr-1" />
-                      Transport
-                    </span>
+                  
+                  {vacation.hotel_name && (
+                    <div className="mt-3">
+                      <p className="text-sm text-gray-600">Hotel</p>
+                      <p className="font-medium">{vacation.hotel_name}</p>
+                    </div>
                   )}
-                  {vacation.hotel_included && (
-                    <span className="flex items-center text-green-600">
-                      <Hotel className="w-4 h-4 mr-1" />
-                      Hotel
-                    </span>
+                  
+                  {/* Display schedule information if available */}
+                  {schedule && (
+                    <div className="mt-3 p-3 bg-white rounded-lg">
+                      <h4 className="font-bold text-sm mb-2">Trip Schedule</h4>
+                      {schedule.flightDetails && (
+                        <div className="mb-2">
+                          <p className="text-sm text-gray-600 flex items-center">
+                            <Plane className="w-4 h-4 mr-1" />
+                            Flight: {schedule.flightDetails}
+                          </p>
+                        </div>
+                      )}
+                      {schedule.mealTimings && (
+                        <div className="mb-2">
+                          <p className="text-sm text-gray-600 flex items-center">
+                            <Utensils className="w-4 h-4 mr-1" />
+                            Meals: {schedule.mealTimings}
+                          </p>
+                        </div>
+                      )}
+                      {schedule.activities && (
+                        <div className="mb-2">
+                          <p className="text-sm text-gray-600 flex items-center">
+                            <Calendar className="w-4 h-4 mr-1" />
+                            Activities: {schedule.activities}
+                          </p>
+                        </div>
+                      )}
+                    </div>
                   )}
+                  
+                  <div className="flex items-center space-x-4 mt-3 text-sm">
+                    {vacation.ride_included && (
+                      <span className="flex items-center text-green-600">
+                        <Car className="w-4 h-4 mr-1" />
+                        Transport
+                      </span>
+                    )}
+                    {vacation.hotel_included && (
+                      <span className="flex items-center text-green-600">
+                        <Hotel className="w-4 h-4 mr-1" />
+                        Hotel
+                      </span>
+                    )}
+                  </div>
+                </div>
+                
+                <div className="flex justify-between items-center pt-3 border-t">
+                  <span className="text-2xl font-bold text-primary-600">
+                    ₹{vacation.total_price.toFixed(2)}
+                  </span>
+                  <div className="flex space-x-3">
+                    <button
+                      onClick={() => handleConfirmVacation(vacation.id)}
+                      className="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors flex items-center"
+                    >
+                      <CheckCircle className="w-4 h-4 mr-2" />
+                      Confirm
+                    </button>
+                  </div>
                 </div>
               </div>
-              
-              <div className="flex justify-between items-center pt-3 border-t">
-                <span className="text-2xl font-bold text-primary-600">
-                  ₹{vacation.total_price.toFixed(2)}
-                </span>
-                <div className="flex space-x-3">
-                  <button
-                    onClick={() => handleConfirmVacation(vacation.id)}
-                    className="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors flex items-center"
-                  >
-                    <CheckCircle className="w-4 h-4 mr-2" />
-                    Confirm
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>

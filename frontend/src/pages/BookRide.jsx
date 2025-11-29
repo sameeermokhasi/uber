@@ -11,7 +11,6 @@ export default function BookRide() {
     pickup_lat: 0,
     pickup_lng: 0,
     destination_address: '',
-    destination_lat: 0,
     destination_lng: 0,
     vehicle_type: 'economy',
     scheduled_time: ''
@@ -19,14 +18,29 @@ export default function BookRide() {
   const [estimatedFare, setEstimatedFare] = useState(null)
   const [loading, setLoading] = useState(false)
   const [mapRouteInfo, setMapRouteInfo] = useState(null)
+  const [popularLocations, setPopularLocations] = useState([])
 
-  // Sample locations for demo (Indian cities)
+  // Sample locations for demo (Indian cities and local areas)
   const sampleLocations = [
-    { name: 'Connaught Place, Delhi', lat: 28.6289, lng: 77.2065 },
-    { name: 'Indira Gandhi Airport, Delhi', lat: 28.5562, lng: 77.1000 },
-    { name: 'Gateway of India, Mumbai', lat: 18.9220, lng: 72.8347 },
-    { name: 'Mumbai Airport', lat: 19.0896, lng: 72.8656 },
-    { name: 'Bangalore City Centre', lat: 12.9716, lng: 77.5946 }
+    // Major Metro Cities
+    { name: 'Bangalore', lat: 12.9716, lng: 77.5946 },
+    { name: 'Delhi', lat: 28.7041, lng: 77.1025 },
+    { name: 'Mumbai', lat: 19.0760, lng: 72.8777 },
+    { name: 'Kolkata', lat: 22.5726, lng: 88.3639 },
+    { name: 'Chennai', lat: 13.0827, lng: 80.2707 },
+    { name: 'Hyderabad', lat: 17.3850, lng: 78.4867 },
+    
+    // Popular Local Areas
+    { name: 'Indiranagar, Bangalore', lat: 12.9719, lng: 77.6412 },
+    { name: 'Koramangala, Bangalore', lat: 12.9352, lng: 77.6245 },
+    { name: 'Connaught Place, Delhi', lat: 28.6333, lng: 77.2250 },
+    { name: 'Gurgaon, Delhi NCR', lat: 28.4595, lng: 77.0266 },
+    { name: 'Bandra, Mumbai', lat: 19.0596, lng: 72.8381 },
+    { name: 'Andheri, Mumbai', lat: 19.1136, lng: 72.8697 },
+    { name: 'Park Street, Kolkata', lat: 22.5489, lng: 88.3500 },
+    { name: 'T Nagar, Chennai', lat: 13.0390, lng: 80.2340 },
+    { name: 'HITEC City, Hyderabad', lat: 17.4448, lng: 78.3852 },
+    { name: 'Jubilee Hills, Hyderabad', lat: 17.4250, lng: 78.4000 }
   ]
 
   const handleLocationSelect = (field, location) => {
@@ -183,17 +197,20 @@ export default function BookRide() {
                     placeholder="Enter pickup location"
                     required
                   />
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {sampleLocations.map((loc, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => handleLocationSelect('pickup', loc)}
-                        className="text-xs bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded-full transition-colors"
-                      >
-                        {loc.name}
-                      </button>
-                    ))}
+                  <div className="mt-2">
+                    <p className="text-xs text-gray-500 mb-2">Popular locations:</p>
+                    <div className="flex flex-wrap gap-2">
+                      {sampleLocations.map((loc, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => handleLocationSelect('pickup', loc)}
+                          className="text-xs bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded-full transition-colors"
+                        >
+                          {loc.name}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
 
@@ -211,17 +228,20 @@ export default function BookRide() {
                     placeholder="Where to?"
                     required
                   />
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {sampleLocations.map((loc, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => handleLocationSelect('destination', loc)}
-                        className="text-xs bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded-full transition-colors"
-                      >
-                        {loc.name}
-                      </button>
-                    ))}
+                  <div className="mt-2">
+                    <p className="text-xs text-gray-500 mb-2">Popular locations:</p>
+                    <div className="flex flex-wrap gap-2">
+                      {sampleLocations.map((loc, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => handleLocationSelect('destination', loc)}
+                          className="text-xs bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded-full transition-colors"
+                        >
+                          {loc.name}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
 

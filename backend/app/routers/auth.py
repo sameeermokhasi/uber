@@ -38,7 +38,19 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
     if new_user.role == UserRole.RIDER:
         loyalty = LoyaltyPoints(user_id=new_user.id)
         db.add(loyalty)
-        db.commit()
+    
+    # Create driver profile for drivers
+    if new_user.role == UserRole.DRIVER:
+        # Generate a default license number
+        license_number = f"LIC{new_user.id:06d}"
+        driver_profile = DriverProfile(
+            user_id=new_user.id,
+            license_number=license_number,
+            is_available=False  # Default to offline until they toggle availability
+        )
+        db.add(driver_profile)
+    
+    db.commit()
     
     # Create access token
     access_token = create_access_token(data={"sub": new_user.email})
